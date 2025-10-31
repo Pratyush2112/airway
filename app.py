@@ -1,64 +1,58 @@
+# aqq.qy
+# -------------------------------------
+# Streamlit Frontend for Innovation Lab
+# Agentic AI Supply Chain Visualization
+# -------------------------------------
+
 import streamlit as st
-import torch
-from innovation_lab import (
-    AutoregrTransformerV2,
-    load_pretrained,
-    export_torchscript,
-    generate_h_for_agent_fast,
-    device,
-)
 import numpy as np
-import os
+import matplotlib.pyplot as plt
+from innovation_lab import load_retrained_model, generate_for_agent
 
-st.set_page_config(page_title="Agentic ERP AI", layout="wide")
+st.set_page_config(page_title="Innovation Lab AI", layout="wide")
+st.title("🧠 Innovation Lab — Agentic AI Flight & Path Predictor")
 
-st.title("🤖 Agentic ERP Supply Chain Dashboard")
-
-# Sidebar: model loading options
-st.sidebar.header("⚙️ Model Options")
-weight_path = st.sidebar.text_input("Weights (.pt)", "best_transformer_v2.pt")
-ts_path = st.sidebar.text_input("TorchScript (.pt)", "best_transformer_v2_ts.pt")
-prefer_ts = st.sidebar.checkbox("Prefer TorchScript if available", True)
-use_half = st.sidebar.checkbox("Use FP16 on CUDA", True)
-use_compile = st.sidebar.checkbox("Use torch.compile()", False)
-
+# Load model
 @st.cache_resource
-def load_model(weight_path, ts_path, prefer_ts, use_half, use_compile):
-    model = AutoregrTransformerV2().to(device)
-    loaded = load_pretrained(
-        model,
-        path_state_dict=weight_path,
-        path_torchscript=ts_path,
-        device=device,
-        use_half_on_cuda=use_half,
-        try_torchscript_first=prefer_ts,
-        use_torch_compile=use_compile,
-    )
-    return loaded
+def get_model():
+    return load_retrained_model("best_transformer_wind.pt")
 
-model = load_model(weight_path, ts_path, prefer_ts, use_half, use_compile)
+model = get_model()
 
-if st.sidebar.button("Export TorchScript (for deployment)"):
-    dummy_grid = torch.zeros((1, 144))
-    dummy_wind = torch.zeros((1, 144 * 3))
-    dummy_hist = torch.zeros((1, 144 * 3))
-    dummy_others = torch.zeros((1, 144 * 2))
-    export_torchscript(model, (dummy_grid, dummy_wind, dummy_hist, dummy_others), save_path=ts_path)
-    st.sidebar.success("✅ TorchScript exported successfully!")
+# Input controls
+st.sidebar.header("Simulation Controls")
+grid_size = st.sidebar.slider("Grid Size", 8, 20, 12)
+wind_intensity = st.sidebar.slider("Wind Intensity", 0.1, 1.0, 0.5)
+agent_pos = st.sidebar.number_input("Agent Token Position", 0, grid_size*grid_size-1, 10)
+goal_pos = st.sidebar.number_input("Goal Token Position", 0, grid_size*grid_size-1, 50)
 
-# -----------------
-#  Input section
-# -----------------
-st.subheader("📦 Simulation Inputs")
+if st.button("🚀 Run AI Simulation"):
+    st.info("Running AI inference with retrained model...")
 
-grid = np.random.rand(12, 12)
-wind = np.random.rand(12, 12, 3)
-hist = [5, 20, 30]
-others = [10, 50]
+    # Dummy grid + wind data
+    grid = np.zeros((grid_size, grid_size))
+    wind = np.random.uniform(-wind_intensity, wind_intensity, size=(grid_size, grid_size, 2))
+    hist = [agent_pos-3, agent_pos-2, agent_pos-1] if agent_pos > 3 else [1, 2, 3]
+    others = [goal_pos]
+    wind_flat = np.concatenate([wind[:,:,0].flatten(), wind[:,:,1].flatten(),
+                                np.zeros_like(grid.flatten())]).astype(np.float32)
 
-if st.button("Run Agentic AI Inference"):
-    preds = generate_h_for_agent_fast(model, grid, wind.flatten(), hist, others)
-    st.success(f"✅ Predicted next sequence: {preds}")
-    st.write("These represent the next predicted positions or tokens for supply chain flow.")
+    preds = generate_for_agent(model, grid, wind_flat, hist, others)
+    st.success(f"Predicted Path Tokens: {preds}")
 
-st.info("💡 Tip: You can replace the weights file with your retrained version for better performance.")
+    # Visualization
+    fig, ax = plt.subplots(figsize=(6,6))
+    ax.imshow(grid, cmap='gray_r', alpha=0.6)
+    ax.scatter(*divmod(agent_pos, grid_size)[::-1], c='blue', label='Start')
+    ax.scatter(*divmod(goal_pos, grid_size)[::-1], c='red', label='Goal')
+
+    for p in preds:
+        px, py = divmod(p, grid_size)
+        ax.scatter(py, px, c='orange', s=50)
+
+    ax.legend()
+    ax.set_title("Predicted Agent Path")
+    st.pyplot(fig)
+
+st.markdown("---")
+st.caption("Developed by Pratyush • IIT Kharagpur 🧩")
